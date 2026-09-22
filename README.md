@@ -3,6 +3,9 @@
 Stack de produção do Chatwoot para uma VPS: Rails + Sidekiq + Postgres (pgvector)
 + Redis + Caddy com HTTPS automático (Let's Encrypt).
 
+> **Usa Claude Code?** Rode `/deploy-chatwoot` — a skill versionada em
+> `.claude/skills/` conduz o deploy do zero, verifica cada etapa e diagnostica falhas.
+
 **Antes de subir, preencha o [`SECRETS.md`](./SECRETS.md).** Ele lista cada
 variável, como gerar os segredos e os pré-requisitos de DNS/firewall.
 
@@ -11,7 +14,7 @@ variável, como gerar os segredos e os pré-requisitos de DNS/firewall.
 ## Deploy pelo Portainer (recomendado)
 
 1. **Stacks → Add stack → Repository**
-2. Repository URL: este repositório · Compose path: `docker-compose.yaml`
+2. Repository URL: `https://github.com/pedrourio/chatwoot-instance` · Compose path: `docker-compose.yaml`
 3. Em **Environment variables**, clique em *Advanced mode* e cole o conteúdo do
    seu `.env` preenchido (use o [`.env.example`](./.env.example) como base).
 4. **Deploy the stack.**
