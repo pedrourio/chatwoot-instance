@@ -1,0 +1,142 @@
+x-chatwoot: &chatwoot
+  image: chatwoot/chatwoot:${CHATWOOT_TAG:-v4.18.0-ce}
+  restart: unless-stopped
+  environment:
+    INSTALLATION_ENV: docker
+    RAILS_ENV: production
+    NODE_ENV: production
+    RAILS_LOG_TO_STDOUT: "true"
+    SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+    FRONTEND_URL: https://${DOMAIN}
+    DEFAULT_LOCALE: ${DEFAULT_LOCALE:-pt_BR}
+    FORCE_SSL: "true"
+    ENABLE_ACCOUNT_SIGNUP: ${ENABLE_ACCOUNT_SIGNUP:-false}
+    RAILS_MAX_THREADS: ${RAILS_MAX_THREADS:-5}
+
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: "5432"
+    POSTGRES_DATABASE: chatwoot
+    POSTGRES_USERNAME: chatwoot
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+    REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+    REDIS_PASSWORD: ${REDIS_PASSWORD}
+
+    ACTIVE_STORAGE_SERVICE: local
+
+    MAILER_SENDER_EMAIL: ${MAILER_SENDER_EMAIL}
+    SMTP_DOMAIN: ${SMTP_DOMAIN}
+    SMTP_ADDRESS: ${SMTP_ADDRESS}
+    SMTP_PORT: ${SMTP_PORT:-587}
+    SMTP_USERNAME: ${SMTP_USERNAME}
+    SMTP_PASSWORD: ${SMTP_PASSWORD}
+    SMTP_AUTHENTICATION: ${SMTP_AUTHENTICATION:-plain}
+    SMTP_ENABLE_STARTTLS_AUTO: ${SMTP_ENABLE_STARTTLS_AUTO:-true}
+  volumes:
+    - storage:/app/storage
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: chatwoot
+      POSTGRES_USER: chatwoot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chatwoot -d chatwoot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+
+  # roda migrations e sai; rails/sidekiq só sobem depois que ele terminar com sucesso
+  init:
+    <<: *chatwoot
+    restart: "no"
+    command: bundle exec rails db:chatwoot_prepare
+
+  rails:
+    <<: *chatwoot
+    command: bundle exec rails s -p 3000 -b 0.0.0.0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+
+  sidekiq:
+    <<: *chatwoot
+    command: bundle exec sidekiq -C config/sidekiq.yml
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    configs:
+      - source: caddyfile
+        target: /etc/caddy/Caddyfile
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - rails
+
+configs:
+  caddyfile:
+    content: |
+      {
+      	email {$$ACME_EMAIL}
+      }
+
+      {$$DOMAIN} {
+      	encode zstd gzip
+
+      	# uploads de midia do Chatwoot
+      	request_body {
+      		max_size 40MB
+      	}
+
+      	reverse_proxy rails:3000
+      }
+
+volumes:
+  postgres:
+  redis:
+  storage:
+  caddy_data:
+  caddy_config:
